@@ -69,7 +69,8 @@ export interface BaseMatch {
   score: Score;
   startTime: string; // ISO 8601
   leagueName: string;
-  leagueSlug?: string; // e.g. 'eng.1', 'uefa.champions'
+  leagueSlug?: string;  // e.g. 'eng.1', 'uefa.champions'
+  leagueFlag?: string;  // e.g. '🏴󠁧󠁢󠁥󠁮󠁧󠁿', '🇪🇸'
   venue?: string;
 }
 

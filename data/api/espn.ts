@@ -2,10 +2,19 @@ import { Match, SoccerMatch, BasketballMatch, MatchStatus, Team, Score, SoccerEv
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports';
 
-const SOCCER_LEAGUES = [
-  { slug: 'eng.1', name: 'EPL' },
-  { slug: 'uefa.champions', name: 'Champions League' },
+export const SOCCER_LEAGUES = [
+  { slug: 'eng.1',          name: 'Premier League',    flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', dateParam: 'date' },
+  { slug: 'esp.1',          name: 'La Liga',            flag: '🇪🇸', dateParam: 'dates' },
+  { slug: 'ger.1',          name: 'Bundesliga',         flag: '🇩🇪', dateParam: 'dates' },
+  { slug: 'ita.1',          name: 'Serie A',            flag: '🇮🇹', dateParam: 'dates' },
+  { slug: 'fra.1',          name: 'Ligue 1',            flag: '🇫🇷', dateParam: 'dates' },
+  { slug: 'uefa.champions', name: 'Champions League',   flag: '🏆', dateParam: 'dates' },
+  { slug: 'uefa.europa',    name: 'Europa League',      flag: '🥈', dateParam: 'dates' },
 ];
+
+export const LEAGUE_FLAG: Record<string, string> = Object.fromEntries(
+  SOCCER_LEAGUES.map(l => [l.name, l.flag])
+);
 
 const ENDPOINTS = {
   basketball: `${ESPN_BASE}/basketball/nba/scoreboard`,
@@ -92,7 +101,7 @@ function mapBoxscoreStats(teams: any[], homeTeamId: string) {
 }
 
 // Fetch matches for a single soccer league
-async function fetchLeagueMatches(leagueSlug: string, leagueName: string, dateQuery = '', requestedDate = ''): Promise<SoccerMatch[]> {
+async function fetchLeagueMatches(leagueSlug: string, leagueName: string, dateQuery = '', requestedDate = '', leagueFlag = ''): Promise<SoccerMatch[]> {
   const res = await fetch(soccerEndpoint(leagueSlug) + dateQuery);
   if (!res.ok) return [];
   const data = await res.json();
@@ -113,6 +122,7 @@ async function fetchLeagueMatches(leagueSlug: string, leagueName: string, dateQu
       status,
       leagueName,
       leagueSlug,
+      leagueFlag,
       venue: comp?.venue?.fullName,
       homeTeam: mapTeam(home, '⚽'),
       awayTeam: mapTeam(away, '⚽'),
@@ -239,19 +249,17 @@ export async function fetchSoccerLineup(espnEventId: string, leagueSlug?: string
 export async function fetchMatchesBySport(sport: SportType, date?: string): Promise<Match[]> {
   const d = date ? date.replace(/-/g, '') : '';
   const requestedDate = date ?? '';              // YYYY-MM-DD for day.date comparison
-  const eplQuery = d ? `?date=${d}` : '';       // EPL uses ?date=
-  const datesQuery = d ? `?dates=${d}` : '';    // UCL/NBA/MLB use ?dates=
+  const datesQuery = d ? `?dates=${d}` : '';    // NBA/MLB use ?dates=
 
   try {
     if (sport === 'soccer') {
-      const [epl, ucl] = await Promise.allSettled([
-        fetchLeagueMatches('eng.1', 'EPL', eplQuery, requestedDate),
-        fetchLeagueMatches('uefa.champions', 'Champions League', datesQuery, requestedDate),
-      ]);
-      return [
-        ...(epl.status === 'fulfilled' ? epl.value : []),
-        ...(ucl.status === 'fulfilled' ? ucl.value : []),
-      ];
+      const results = await Promise.allSettled(
+        SOCCER_LEAGUES.map(l => {
+          const q = d ? `?${l.dateParam}=${d}` : '';
+          return fetchLeagueMatches(l.slug, l.name, q, requestedDate, l.flag);
+        })
+      );
+      return results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
     }
 
     if (sport === 'basketball') {

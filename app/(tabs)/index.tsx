@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
-  FlatList,
+  SectionList,
   StyleSheet,
   RefreshControl,
   Text,
@@ -15,7 +15,7 @@ import DateTabBar from '../../components/DateTabBar';
 import MatchCard from '../../components/MatchCard';
 import EmptyState from '../../components/EmptyState';
 import { SportType, Match } from '../../data/mock/types';
-import { fetchMatchesBySport } from '../../data/api/espn';
+import { fetchMatchesBySport, LEAGUE_FLAG } from '../../data/api/espn';
 import { setMatches as cacheMatches } from '../../data/matchCache';
 import Colors from '../../constants/colors';
 
@@ -26,6 +26,62 @@ function getTodayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// League sort order for soccer
+const LEAGUE_ORDER = [
+  'Champions League', 'Europa League',
+  'Premier League', 'La Liga', 'Bundesliga', 'Serie A', 'Ligue 1',
+];
+function leagueRank(name: string) {
+  const i = LEAGUE_ORDER.indexOf(name);
+  return i === -1 ? 99 : i;
+}
+
+type Section = { title: string; flag: string; data: Match[] };
+
+function buildSections(matches: Match[]): Section[] {
+  const map = new Map<string, Match[]>();
+  for (const m of matches) {
+    const key = m.leagueName;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(m);
+  }
+  return Array.from(map.entries())
+    .sort(([a], [b]) => leagueRank(a) - leagueRank(b))
+    .map(([name, data]) => ({
+      title: name,
+      flag: (data[0] as any).leagueFlag ?? LEAGUE_FLAG[name] ?? '🏆',
+      data,
+    }));
+}
+
+function LeagueSectionHeader({ title, flag }: { title: string; flag: string }) {
+  return (
+    <View style={headerStyles.container}>
+      <Text style={headerStyles.flag}>{flag}</Text>
+      <Text style={headerStyles.title}>{title}</Text>
+    </View>
+  );
+}
+
+const headerStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: Colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    gap: 8,
+  },
+  flag: { fontSize: 18 },
+  title: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+});
+
 export default function HomeScreen() {
   const [selectedSport, setSelectedSport] = useState<SportType>('soccer');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayStr());
@@ -33,6 +89,11 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [matches, setMatches] = useState<Match[]>([]);
   const [matchCounts, setMatchCounts] = useState<Partial<Record<SportType, number>>>({});
+
+  const sections = useMemo(() => {
+    if (selectedSport === 'soccer') return buildSections(matches);
+    return [{ title: selectedSport === 'baseball' ? 'MLB' : 'NBA', flag: selectedSport === 'baseball' ? '⚾' : '🏀', data: matches }];
+  }, [matches, selectedSport]);
 
   const loadSport = useCallback(async () => {
     try {
@@ -59,7 +120,6 @@ export default function HomeScreen() {
       });
       cacheMatches(sorted);
       setMatches(sorted);
-      // Update count for this sport immediately
       setMatchCounts(prev => ({ ...prev, [sport]: sorted.length }));
     } catch {
       setMatches([]);
@@ -102,6 +162,8 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [selectedSport, selectedDate, loadMatches]);
 
+  const sportLabel = selectedSport === 'soccer' ? '축구' : selectedSport === 'baseball' ? '야구' : '농구';
+
   return (
     <View style={styles.container}>
       <SportTabBar
@@ -114,12 +176,17 @@ export default function HomeScreen() {
       {loading && (
         <ActivityIndicator style={{ marginTop: 24 }} color={Colors.primary} />
       )}
-      <FlatList
-        data={matches}
+
+      <SectionList
+        sections={sections}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <MatchCard match={item} />}
+        renderSectionHeader={({ section }) => (
+          <LeagueSectionHeader title={section.title} flag={section.flag} />
+        )}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -128,25 +195,12 @@ export default function HomeScreen() {
           />
         }
         ListEmptyComponent={
-          <EmptyState
-            icon="🏟️"
-            title="경기가 없습니다"
-            subtitle={`선택한 날짜에 ${
-              selectedSport === 'soccer'
-                ? '축구'
-                : selectedSport === 'baseball'
-                ? '야구'
-                : '농구'
-            } 경기가 없습니다.`}
-          />
-        }
-        ListHeaderComponent={
-          matches.length > 0 ? (
-            <View style={styles.listHeader}>
-              <Text style={styles.listHeaderText}>
-                {matches.length}경기
-              </Text>
-            </View>
+          !loading ? (
+            <EmptyState
+              icon="🏟️"
+              title="경기가 없습니다"
+              subtitle={`선택한 날짜에 ${sportLabel} 경기가 없습니다.`}
+            />
           ) : null
         }
       />
@@ -160,17 +214,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   listContent: {
-    paddingTop: 8,
     paddingBottom: 24,
     flexGrow: 1,
-  },
-  listHeader: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  listHeaderText: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '500',
   },
 });

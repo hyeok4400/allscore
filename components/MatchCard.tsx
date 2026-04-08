@@ -2,7 +2,6 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Match, SoccerMatch, BaseballMatch, BasketballMatch } from '../data/mock/types';
-import LiveBadge from './LiveBadge';
 import Colors from '../constants/colors';
 
 function TeamLogo({ logo }: { logo: string }) {
@@ -10,179 +9,139 @@ function TeamLogo({ logo }: { logo: string }) {
   if (isUrl) {
     return <Image source={{ uri: logo }} style={styles.teamLogoImg} resizeMode="contain" />;
   }
-  return <Text style={styles.teamLogo}>{logo}</Text>;
+  return <Text style={styles.teamLogoEmoji}>{logo}</Text>;
 }
 
 interface MatchCardProps {
   match: Match;
 }
 
-function getStatusDetail(match: Match): string | undefined {
+function getCenterContent(match: Match): { top: string; bottom?: string; isLive: boolean; isFinished: boolean } {
   if (match.status === 'UPCOMING') {
     const d = new Date(match.startTime);
     const h = d.getHours().toString().padStart(2, '0');
     const m = d.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
+    return { top: `${h}:${m}`, isLive: false, isFinished: false };
   }
   if (match.status === 'LIVE') {
-    if (match.sport === 'soccer') {
-      const sm = match as SoccerMatch;
-      return sm.minute ? `${sm.minute}'` : 'LIVE';
-    }
-    if (match.sport === 'baseball') {
+    let bottom = 'LIVE';
+    if (match.sport === 'soccer') bottom = (match as SoccerMatch).minute ? `${(match as SoccerMatch).minute}'` : 'LIVE';
+    else if (match.sport === 'baseball') {
       const bm = match as BaseballMatch;
-      return bm.currentInning
-        ? `${bm.currentInning}회${bm.inningHalf === 'top' ? '초' : '말'}`
-        : 'LIVE';
+      bottom = bm.currentInning ? `${bm.currentInning}회` : 'LIVE';
+    } else if (match.sport === 'basketball') {
+      const bk = match as BasketballMatch;
+      bottom = bk.currentQuarter ? `Q${bk.currentQuarter}` : 'LIVE';
     }
-    if (match.sport === 'basketball') {
-      const bkm = match as BasketballMatch;
-      return bkm.currentQuarter
-        ? `Q${bkm.currentQuarter} ${bkm.quarterTimeLeft ?? ''}`
-        : 'LIVE';
-    }
+    return { top: `${match.score.home} - ${match.score.away}`, bottom, isLive: true, isFinished: false };
   }
-  return undefined;
+  // FINISHED
+  return { top: `${match.score.home} - ${match.score.away}`, bottom: '종료', isLive: false, isFinished: true };
 }
 
 export default function MatchCard({ match }: MatchCardProps) {
   const router = useRouter();
-  const statusDetail = getStatusDetail(match);
-
-  const handlePress = () => {
-    router.push(`/match/${match.id}` as any);
-  };
-
-  const isLive = match.status === 'LIVE';
+  const center = getCenterContent(match);
 
   return (
     <TouchableOpacity
-      style={[styles.card, isLive && styles.cardLive]}
-      onPress={handlePress}
+      style={styles.row}
+      onPress={() => router.push(`/match/${match.id}` as any)}
       activeOpacity={0.7}
     >
-      {/* Status Badge */}
-      <View style={styles.statusRow}>
-        <LiveBadge status={match.status} detail={statusDetail} />
-        <Text style={styles.leagueName}>{match.leagueName}</Text>
+      {/* Home team */}
+      <View style={styles.teamLeft}>
+        <TeamLogo logo={match.homeTeam.logo} />
+        <Text style={styles.teamName} numberOfLines={1}>{match.homeTeam.name}</Text>
       </View>
 
-      {/* Teams & Score */}
-      <View style={styles.matchRow}>
-        {/* Home Team */}
-        <View style={styles.teamSection}>
-          <TeamLogo logo={match.homeTeam.logo} />
-          <Text style={styles.teamName} numberOfLines={1}>
-            {match.homeTeam.name}
+      {/* Center: time or score */}
+      <View style={styles.center}>
+        <Text style={[
+          styles.centerTop,
+          center.isLive && styles.centerLive,
+          center.isFinished && styles.centerFinished,
+        ]}>
+          {center.top}
+        </Text>
+        {center.bottom && (
+          <Text style={[styles.centerBottom, center.isLive && styles.centerBottomLive]}>
+            {center.bottom}
           </Text>
-        </View>
-
-        {/* Score */}
-        <View style={styles.scoreSection}>
-          {match.status === 'UPCOMING' ? (
-            <Text style={styles.scoreVs}>vs</Text>
-          ) : (
-            <Text style={[styles.score, isLive && styles.scoreLive]}>
-              {match.score.home} - {match.score.away}
-            </Text>
-          )}
-        </View>
-
-        {/* Away Team */}
-        <View style={[styles.teamSection, styles.awayTeam]}>
-          <TeamLogo logo={match.awayTeam.logo} />
-          <Text style={styles.teamName} numberOfLines={1}>
-            {match.awayTeam.name}
-          </Text>
-        </View>
+        )}
       </View>
 
-      {/* Live indicator bar */}
-      {isLive && <View style={styles.liveBar} />}
+      {/* Away team */}
+      <View style={styles.teamRight}>
+        <Text style={styles.teamName} numberOfLines={1}>{match.awayTeam.name}</Text>
+        <TeamLogo logo={match.awayTeam.logo} />
+      </View>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    marginHorizontal: 16,
-    marginVertical: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-    overflow: 'hidden',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.borderLight,
   },
-  cardLive: {
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.live,
-  },
-  statusRow: {
+  teamLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 10,
   },
-  leagueName: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  matchRow: {
+  teamRight: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  teamSection: {
-    flex: 1,
-    alignItems: 'flex-start',
-    gap: 4,
-  },
-  awayTeam: {
-    alignItems: 'flex-end',
-  },
-  teamLogo: {
-    fontSize: 24,
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   teamLogoImg: {
-    width: 36,
-    height: 36,
+    width: 28,
+    height: 28,
+    flexShrink: 0,
+  },
+  teamLogoEmoji: {
+    fontSize: 22,
+    flexShrink: 0,
   },
   teamName: {
     fontSize: 13,
     fontWeight: '600',
     color: Colors.textPrimary,
-    maxWidth: 120,
+    flexShrink: 1,
   },
-  scoreSection: {
+  center: {
+    width: 72,
     alignItems: 'center',
-    paddingHorizontal: 12,
+    gap: 2,
   },
-  score: {
-    fontSize: 22,
-    fontWeight: '800',
+  centerTop: {
+    fontSize: 15,
+    fontWeight: '700',
     color: Colors.textPrimary,
-    letterSpacing: 1,
+    textAlign: 'center',
   },
-  scoreLive: {
+  centerLive: {
     color: Colors.live,
   },
-  scoreVs: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.textMuted,
+  centerFinished: {
+    color: Colors.textPrimary,
   },
-  liveBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: Colors.live,
-    opacity: 0.3,
+  centerBottom: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
+  centerBottomLive: {
+    color: Colors.live,
+    fontWeight: '600',
   },
 });
