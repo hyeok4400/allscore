@@ -426,7 +426,18 @@ export default function MatchDetailScreen() {
       cacheMatches(matches);
       const found = matches.find(m => m.id === id);
       if (found) {
-        setMatch(found);
+        // 종료/라이브 경기는 summary에서 실제 이벤트+통계도 가져오기
+        if (found.sport === 'soccer' && (found.status === 'FINISHED' || found.status === 'LIVE')) {
+          const summary = await fetchSoccerSummary(id, (found as any).leagueSlug);
+          if (summary) {
+            setMatch(summary.match);
+            if (summary.lineups) { setLineups(summary.lineups); setLineupLoaded(true); }
+          } else {
+            setMatch(found);
+          }
+        } else {
+          setMatch(found);
+        }
         setMatchLoading(false);
         return;
       }
@@ -446,6 +457,8 @@ export default function MatchDetailScreen() {
       } else {
         setMatch(null);
       }
+      setMatchLoading(false);
+      return;
       setMatchLoading(false);
     }).catch(() => {
       setMatch(null);
