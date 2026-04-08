@@ -92,10 +92,13 @@ function mapBoxscoreStats(teams: any[], homeTeamId: string) {
 }
 
 // Fetch matches for a single soccer league
-async function fetchLeagueMatches(leagueSlug: string, leagueName: string, dateQuery = ''): Promise<SoccerMatch[]> {
+async function fetchLeagueMatches(leagueSlug: string, leagueName: string, dateQuery = '', requestedDate = ''): Promise<SoccerMatch[]> {
   const res = await fetch(soccerEndpoint(leagueSlug) + dateQuery);
   if (!res.ok) return [];
   const data = await res.json();
+
+  // ESPN returns next match day when no games on requested date — filter it out
+  if (requestedDate && data.day?.date && data.day.date !== requestedDate) return [];
 
   return (data.events ?? []).map((event: any): SoccerMatch => {
     const comp = event.competitions?.[0];
@@ -122,38 +125,6 @@ async function fetchLeagueMatches(leagueSlug: string, leagueName: string, dateQu
   });
 }
 
-// Basketball (NBA)
-async function fetchBasketballMatches(dateQuery = ''): Promise<BasketballMatch[]> {
-  const res = await fetch(ENDPOINTS.basketball + dateQuery);
-  if (!res.ok) throw new Error('ESPN basketball fetch failed');
-  const data = await res.json();
-
-  return (data.events ?? []).map((event: any): BasketballMatch => {
-    const comp = event.competitions?.[0];
-    const competitors = comp?.competitors ?? [];
-    const home = competitors.find((c: any) => c.homeAway === 'home');
-    const away = competitors.find((c: any) => c.homeAway === 'away');
-    const status = mapStatus(comp?.status?.type?.state, comp?.status?.type?.completed);
-    const homeLines: number[] = home?.linescores?.map((l: any) => parseInt(l.value ?? '0', 10)) ?? [];
-    const awayLines: number[] = away?.linescores?.map((l: any) => parseInt(l.value ?? '0', 10)) ?? [];
-
-    return {
-      id: `espn-bball-${event.id}`,
-      sport: 'basketball',
-      status,
-      leagueName: 'NBA',
-      venue: comp?.venue?.fullName,
-      homeTeam: mapTeam(home, '🏀'),
-      awayTeam: mapTeam(away, '🏀'),
-      score: mapScore(competitors),
-      startTime: event.date,
-      currentQuarter: status === 'LIVE' ? comp?.status?.period : undefined,
-      quarterTimeLeft: status === 'LIVE' ? comp?.status?.displayClock : undefined,
-      quarters: homeLines.map((h, i) => ({ quarter: i + 1, homeScore: h, awayScore: awayLines[i] ?? 0 })),
-      stats: { fieldGoalPct: { home: 0, away: 0 }, threePointPct: { home: 0, away: 0 }, rebounds: { home: 0, away: 0 }, assists: { home: 0, away: 0 } },
-    };
-  });
-}
 
 export type SportType = 'soccer' | 'baseball' | 'basketball';
 
@@ -267,15 +238,15 @@ export async function fetchSoccerLineup(espnEventId: string, leagueSlug?: string
 
 export async function fetchMatchesBySport(sport: SportType, date?: string): Promise<Match[]> {
   const d = date ? date.replace(/-/g, '') : '';
+  const requestedDate = date ?? '';              // YYYY-MM-DD for day.date comparison
   const eplQuery = d ? `?date=${d}` : '';       // EPL uses ?date=
   const datesQuery = d ? `?dates=${d}` : '';    // UCL/NBA/MLB use ?dates=
 
   try {
     if (sport === 'soccer') {
-      // Fetch EPL + UCL in parallel (different date param formats)
       const [epl, ucl] = await Promise.allSettled([
-        fetchLeagueMatches('eng.1', 'EPL', eplQuery),
-        fetchLeagueMatches('uefa.champions', 'Champions League', datesQuery),
+        fetchLeagueMatches('eng.1', 'EPL', eplQuery, requestedDate),
+        fetchLeagueMatches('uefa.champions', 'Champions League', datesQuery, requestedDate),
       ]);
       return [
         ...(epl.status === 'fulfilled' ? epl.value : []),
@@ -283,12 +254,42 @@ export async function fetchMatchesBySport(sport: SportType, date?: string): Prom
       ];
     }
 
-    if (sport === 'basketball') return await fetchBasketballMatches(datesQuery);
+    if (sport === 'basketball') {
+      const res = await fetch(ENDPOINTS.basketball + datesQuery);
+      if (!res.ok) throw new Error('ESPN basketball fetch failed');
+      const data = await res.json();
+      if (requestedDate && data.day?.date && data.day.date !== requestedDate) return [];
+      return (data.events ?? []).map((event: any): BasketballMatch => {
+        const comp = event.competitions?.[0];
+        const competitors = comp?.competitors ?? [];
+        const home = competitors.find((c: any) => c.homeAway === 'home');
+        const away = competitors.find((c: any) => c.homeAway === 'away');
+        const status = mapStatus(comp?.status?.type?.state, comp?.status?.type?.completed);
+        const homeLines: number[] = home?.linescores?.map((l: any) => parseInt(l.value ?? '0', 10)) ?? [];
+        const awayLines: number[] = away?.linescores?.map((l: any) => parseInt(l.value ?? '0', 10)) ?? [];
+        return {
+          id: `espn-bball-${event.id}`,
+          sport: 'basketball',
+          status,
+          leagueName: 'NBA',
+          venue: comp?.venue?.fullName,
+          homeTeam: mapTeam(home, '🏀'),
+          awayTeam: mapTeam(away, '🏀'),
+          score: mapScore(competitors),
+          startTime: event.date,
+          currentQuarter: status === 'LIVE' ? comp?.status?.period : undefined,
+          quarterTimeLeft: status === 'LIVE' ? comp?.status?.displayClock : undefined,
+          quarters: homeLines.map((h, i) => ({ quarter: i + 1, homeScore: h, awayScore: awayLines[i] ?? 0 })),
+          stats: { fieldGoalPct: { home: 0, away: 0 }, threePointPct: { home: 0, away: 0 }, rebounds: { home: 0, away: 0 }, assists: { home: 0, away: 0 } },
+        };
+      });
+    }
 
     // baseball: MLB
     const res = await fetch(ENDPOINTS.baseball + datesQuery);
     if (!res.ok) throw new Error('ESPN baseball fetch failed');
     const data = await res.json();
+    if (requestedDate && data.day?.date && data.day.date !== requestedDate) return [];
     return (data.events ?? []).map((event: any) => {
       const comp = event.competitions?.[0];
       const competitors = comp?.competitors ?? [];

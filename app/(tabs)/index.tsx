@@ -52,9 +52,7 @@ export default function HomeScreen() {
   const loadMatches = useCallback(async (sport: SportType, date: string) => {
     setLoading(true);
     try {
-      const todayStr = getTodayStr();
-      const dateArg = date === todayStr ? undefined : date;
-      const apiMatches = await fetchMatchesBySport(sport, dateArg);
+      const apiMatches = await fetchMatchesBySport(sport, date);
       const sorted = [...apiMatches].sort((a, b) => {
         const order = { LIVE: 0, UPCOMING: 1, FINISHED: 2 };
         return order[a.status] - order[b.status];
@@ -71,10 +69,8 @@ export default function HomeScreen() {
   }, []);
 
   const loadOtherCounts = useCallback(async (currentSport: SportType, date: string) => {
-    const todayStr = getTodayStr();
-    const dateArg = date === todayStr ? undefined : date;
     const others = (['soccer', 'baseball', 'basketball'] as SportType[]).filter(s => s !== currentSport);
-    const results = await Promise.allSettled(others.map(s => fetchMatchesBySport(s, dateArg)));
+    const results = await Promise.allSettled(others.map(s => fetchMatchesBySport(s, date)));
     setMatchCounts(prev => {
       const next = { ...prev };
       others.forEach((s, i) => {
