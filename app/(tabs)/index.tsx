@@ -15,7 +15,6 @@ import DateTabBar from '../../components/DateTabBar';
 import MatchCard from '../../components/MatchCard';
 import EmptyState from '../../components/EmptyState';
 import { SportType, Match } from '../../data/mock/types';
-import { getMatchesBySport, soccerMatches, baseballMatches, basketballMatches } from '../../data/mock/matches';
 import { fetchMatchesBySport } from '../../data/api/espn';
 import { setMatches as cacheMatches } from '../../data/matchCache';
 import Colors from '../../constants/colors';
@@ -27,22 +26,13 @@ function getTodayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function getLiveCounts(): Partial<Record<SportType, number>> {
-  const counts: Partial<Record<SportType, number>> = {};
-  for (const m of soccerMatches) if (m.status === 'LIVE') counts.soccer = (counts.soccer ?? 0) + 1;
-  for (const m of baseballMatches) if (m.status === 'LIVE') counts.baseball = (counts.baseball ?? 0) + 1;
-  for (const m of basketballMatches) if (m.status === 'LIVE') counts.basketball = (counts.basketball ?? 0) + 1;
-  return counts;
-}
-
 export default function HomeScreen() {
   const [selectedSport, setSelectedSport] = useState<SportType>('soccer');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayStr());
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [matches, setMatches] = useState<Match[]>([]);
-
-  const liveCounts = getLiveCounts();
+  const [matchCounts, setMatchCounts] = useState<Partial<Record<SportType, number>>>({});
 
   const loadSport = useCallback(async () => {
     try {
@@ -62,15 +52,17 @@ export default function HomeScreen() {
   const loadMatches = useCallback(async (sport: SportType, date: string) => {
     setLoading(true);
     try {
-      // 오늘은 date 파라미터 없이 호출 (ESPN 기본 엔드포인트가 더 정확)
       const todayStr = getTodayStr();
-      const apiMatches = await fetchMatchesBySport(sport, date === todayStr ? undefined : date);
+      const dateArg = date === todayStr ? undefined : date;
+      const apiMatches = await fetchMatchesBySport(sport, dateArg);
       const sorted = [...apiMatches].sort((a, b) => {
         const order = { LIVE: 0, UPCOMING: 1, FINISHED: 2 };
         return order[a.status] - order[b.status];
       });
       cacheMatches(sorted);
       setMatches(sorted);
+      // Update count for this sport immediately
+      setMatchCounts(prev => ({ ...prev, [sport]: sorted.length }));
     } catch {
       setMatches([]);
     } finally {
@@ -78,9 +70,28 @@ export default function HomeScreen() {
     }
   }, []);
 
+  const loadOtherCounts = useCallback(async (currentSport: SportType, date: string) => {
+    const todayStr = getTodayStr();
+    const dateArg = date === todayStr ? undefined : date;
+    const others = (['soccer', 'baseball', 'basketball'] as SportType[]).filter(s => s !== currentSport);
+    const results = await Promise.allSettled(others.map(s => fetchMatchesBySport(s, dateArg)));
+    setMatchCounts(prev => {
+      const next = { ...prev };
+      others.forEach((s, i) => {
+        const r = results[i];
+        next[s] = r.status === 'fulfilled' ? r.value.length : 0;
+      });
+      return next;
+    });
+  }, []);
+
   React.useEffect(() => {
     loadMatches(selectedSport, selectedDate);
   }, [selectedSport, selectedDate, loadMatches]);
+
+  React.useEffect(() => {
+    loadOtherCounts(selectedSport, selectedDate);
+  }, [selectedDate, loadOtherCounts]);
 
   const handleSelectSport = async (sport: SportType) => {
     setSelectedSport(sport);
@@ -100,7 +111,7 @@ export default function HomeScreen() {
       <SportTabBar
         selected={selectedSport}
         onSelect={handleSelectSport}
-        liveCounts={liveCounts}
+        liveCounts={matchCounts}
       />
       <DateTabBar selectedDate={selectedDate} onSelect={setSelectedDate} />
 
