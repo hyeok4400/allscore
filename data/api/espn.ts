@@ -100,39 +100,77 @@ function mapBoxscoreStats(teams: any[], homeTeamId: string) {
   };
 }
 
-// Fetch matches for a single soccer league
-async function fetchLeagueMatches(leagueSlug: string, leagueName: string, dateQuery = '', requestedDate = '', leagueFlag = ''): Promise<SoccerMatch[]> {
-  const res = await fetch(soccerEndpoint(leagueSlug) + dateQuery);
-  if (!res.ok) return [];
-  const data = await res.json();
+// Shift YYYYMMDD by delta days
+function shiftDay(d: string, delta: number): string {
+  const date = new Date(Date.UTC(+d.slice(0,4), +d.slice(4,6)-1, +d.slice(6,8)));
+  date.setUTCDate(date.getUTCDate() + delta);
+  return `${date.getUTCFullYear()}${String(date.getUTCMonth()+1).padStart(2,'0')}${String(date.getUTCDate()).padStart(2,'0')}`;
+}
 
-  // ESPN returns next match day when no games on requested date — filter it out
-  if (requestedDate && data.day?.date && data.day.date !== requestedDate) return [];
+// Convert event UTC date string to local YYYY-MM-DD
+function toLocalDate(isoStr: string): string {
+  const d = new Date(isoStr);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
-  return (data.events ?? []).map((event: any): SoccerMatch => {
-    const comp = event.competitions?.[0];
-    const competitors = comp?.competitors ?? [];
-    const home = competitors.find((c: any) => c.homeAway === 'home');
-    const away = competitors.find((c: any) => c.homeAway === 'away');
-    const status = mapStatus(comp?.status?.type?.state, comp?.status?.type?.completed);
+function mapSoccerEvent(event: any, leagueName: string, leagueSlug: string, leagueFlag: string): SoccerMatch {
+  const comp = event.competitions?.[0];
+  const competitors = comp?.competitors ?? [];
+  const home = competitors.find((c: any) => c.homeAway === 'home');
+  const away = competitors.find((c: any) => c.homeAway === 'away');
+  const status = mapStatus(comp?.status?.type?.state, comp?.status?.type?.completed);
+  return {
+    id: `espn-soccer-${event.id}`,
+    sport: 'soccer',
+    status,
+    leagueName,
+    leagueSlug,
+    leagueFlag,
+    venue: comp?.venue?.fullName,
+    homeTeam: mapTeam(home, '⚽'),
+    awayTeam: mapTeam(away, '⚽'),
+    score: mapScore(competitors),
+    startTime: event.date,
+    minute: status === 'LIVE' ? parseInt(comp?.status?.displayClock ?? '0') : undefined,
+    events: [],
+    stats: { possession: { home: 50, away: 50 }, shots: { home: 0, away: 0 }, shotsOnTarget: { home: 0, away: 0 }, corners: { home: 0, away: 0 }, fouls: { home: 0, away: 0 } },
+  };
+}
 
-    return {
-      id: `espn-soccer-${event.id}`,
-      sport: 'soccer',
-      status,
-      leagueName,
-      leagueSlug,
-      leagueFlag,
-      venue: comp?.venue?.fullName,
-      homeTeam: mapTeam(home, '⚽'),
-      awayTeam: mapTeam(away, '⚽'),
-      score: mapScore(competitors),
-      startTime: event.date,
-      minute: status === 'LIVE' ? parseInt(comp?.status?.displayClock ?? '0') : undefined,
-      events: [],
-      stats: { possession: { home: 50, away: 50 }, shots: { home: 0, away: 0 }, shotsOnTarget: { home: 0, away: 0 }, corners: { home: 0, away: 0 }, fouls: { home: 0, away: 0 } },
-    };
-  });
+// Fetch matches for a single soccer league.
+// Queries current date AND previous day to handle timezone offsets (e.g. European evening games
+// appear on different ESPN calendar days vs local Korean time). Filters each event by local date.
+async function fetchLeagueMatches(leagueSlug: string, leagueName: string, d: string, dateParam: string, requestedDate: string, leagueFlag = ''): Promise<SoccerMatch[]> {
+  if (!d) {
+    // No date specified — fetch default scoreboard
+    const res = await fetch(soccerEndpoint(leagueSlug));
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.events ?? []).map((e: any) => mapSoccerEvent(e, leagueName, leagueSlug, leagueFlag));
+  }
+
+  // Fetch current date AND previous day in parallel to catch cross-midnight games
+  const prevD = shiftDay(d, -1);
+  const [r1, r2] = await Promise.allSettled([
+    fetch(soccerEndpoint(leagueSlug) + `?${dateParam}=${d}`).then(r => r.ok ? r.json() : null),
+    fetch(soccerEndpoint(leagueSlug) + `?${dateParam}=${prevD}`).then(r => r.ok ? r.json() : null),
+  ]);
+
+  const seen = new Set<string>();
+  const matches: SoccerMatch[] = [];
+
+  for (const result of [r1, r2]) {
+    if (result.status !== 'fulfilled' || !result.value) continue;
+    const events: any[] = result.value.events ?? [];
+    for (const event of events) {
+      if (seen.has(event.id)) continue;
+      // Filter: only include events whose local-timezone date matches requested date
+      if (toLocalDate(event.date) !== requestedDate) continue;
+      seen.add(event.id);
+      matches.push(mapSoccerEvent(event, leagueName, leagueSlug, leagueFlag));
+    }
+  }
+  return matches;
 }
 
 
@@ -254,10 +292,7 @@ export async function fetchMatchesBySport(sport: SportType, date?: string): Prom
   try {
     if (sport === 'soccer') {
       const results = await Promise.allSettled(
-        SOCCER_LEAGUES.map(l => {
-          const q = d ? `?${l.dateParam}=${d}` : '';
-          return fetchLeagueMatches(l.slug, l.name, q, requestedDate, l.flag);
-        })
+        SOCCER_LEAGUES.map(l => fetchLeagueMatches(l.slug, l.name, d, l.dateParam, requestedDate, l.flag))
       );
       return results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
     }
