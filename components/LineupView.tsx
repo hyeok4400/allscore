@@ -40,16 +40,20 @@ function PlayerDot({ player }: { player: LineupPlayer }) {
   );
 }
 
-function FormationRows({ lineup, inverted }: { lineup: TeamLineup; inverted: boolean }) {
+// labelAtBottom: true = formation label rendered after player rows (home half)
+function FormationRows({ lineup, reverseRows, labelAtBottom }: { lineup: TeamLineup; reverseRows: boolean; labelAtBottom: boolean }) {
   const rows = groupPlayersByRow(lineup.starters, lineup.formation);
-  const displayRows = inverted ? [...rows].reverse() : rows;
+  // reverseRows=true → ATT at top, GK at bottom (home half, attacking upward)
+  // reverseRows=false → GK at top, ATT at bottom (away half, attacking downward)
+  const displayRows = reverseRows ? [...rows].reverse() : rows;
+
+  const label = (
+    <Text style={pitchStyles.formationLabel}>{lineup.formation}</Text>
+  );
 
   return (
-    <View style={[pitchStyles.half, inverted && pitchStyles.halfTop]}>
-      {/* Formation label */}
-      <Text style={[pitchStyles.formationLabel, inverted && pitchStyles.formationLabelTop]}>
-        {lineup.formation}
-      </Text>
+    <View style={pitchStyles.half}>
+      {!labelAtBottom && label}
       {displayRows.map((row, i) => (
         <View key={i} style={pitchStyles.row}>
           {row.map((player, j) => (
@@ -57,6 +61,7 @@ function FormationRows({ lineup, inverted }: { lineup: TeamLineup; inverted: boo
           ))}
         </View>
       ))}
+      {labelAtBottom && label}
     </View>
   );
 }
@@ -69,12 +74,12 @@ export default function LineupView({ lineups }: Props) {
     <ScrollView style={lineupStyles.scroll} showsVerticalScrollIndicator={false}>
       {/* Pitch */}
       <View style={pitchStyles.pitch}>
-        {/* Away (top, inverted) */}
-        {away && <FormationRows lineup={away} inverted={true} />}
+        {/* Away (top half): GK at top → attackers near center line */}
+        {away && <FormationRows lineup={away} reverseRows={false} labelAtBottom={false} />}
         {/* Center line */}
         <View style={pitchStyles.centerLine} />
-        {/* Home (bottom) */}
-        {home && <FormationRows lineup={home} inverted={false} />}
+        {/* Home (bottom half): attackers near center line → GK at bottom */}
+        {home && <FormationRows lineup={home} reverseRows={true} labelAtBottom={true} />}
       </View>
 
       {/* Bench */}
@@ -117,9 +122,6 @@ const pitchStyles = StyleSheet.create({
     minHeight: 220,
     justifyContent: 'space-around',
   },
-  halfTop: {
-    borderBottomWidth: 0,
-  },
   centerLine: {
     height: 1,
     backgroundColor: PITCH_LINE,
@@ -136,11 +138,7 @@ const pitchStyles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 2,
-  },
-  formationLabelTop: {
-    marginBottom: 0,
-    marginTop: 2,
+    marginVertical: 2,
   },
 });
 
