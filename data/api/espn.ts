@@ -222,10 +222,13 @@ export async function fetchSoccerSummary(
 ): Promise<{ match: SoccerMatch; lineups: TeamLineup[] | null } | null> {
   const numericId = espnEventId.replace('espn-soccer-', '');
 
-  // Try provided slug first, then all leagues
+  // Try provided slug first, then UEFA competitions, then domestic leagues
+  const UEFA_FIRST = ['uefa.champions', 'uefa.europa'];
+  const allSlugs = SOCCER_LEAGUES.map(l => l.slug);
+  const defaultOrder = [...UEFA_FIRST, ...allSlugs.filter(s => !UEFA_FIRST.includes(s))];
   const slugsToTry = leagueSlug
-    ? [leagueSlug, ...SOCCER_LEAGUES.map(l => l.slug).filter(s => s !== leagueSlug)]
-    : SOCCER_LEAGUES.map(l => l.slug);
+    ? [leagueSlug, ...defaultOrder.filter(s => s !== leagueSlug)]
+    : defaultOrder;
 
   for (const slug of slugsToTry) {
     try {
@@ -240,7 +243,11 @@ export async function fetchSoccerSummary(
       const home = competitors.find((c: any) => c.homeAway === 'home');
       const away = competitors.find((c: any) => c.homeAway === 'away');
       const status = mapStatus(comp.status?.type?.state, comp.status?.type?.completed);
-      const leagueName = SOCCER_LEAGUES.find(l => l.slug === slug)?.name ?? 'Soccer';
+
+      // Prefer ESPN's own league name from the response; fall back to our slug mapping
+      const espnLeagueName: string = data.header?.league?.name ?? data.header?.leagues?.[0]?.name ?? '';
+      const leagueName = espnLeagueName || SOCCER_LEAGUES.find(l => l.slug === slug)?.name || 'Soccer';
+      const leagueFlag = SOCCER_LEAGUES.find(l => l.name === leagueName || l.slug === slug)?.flag ?? '⚽';
 
       // Parse real events from keyEvents
       const homeTeamId: string = home?.id ?? '';
@@ -258,6 +265,7 @@ export async function fetchSoccerSummary(
         status,
         leagueName,
         leagueSlug: slug,
+        leagueFlag,
         venue: data.gameInfo?.venue?.fullName ?? comp.venue?.fullName,
         homeTeam: mapTeam(home, '⚽'),
         awayTeam: mapTeam(away, '⚽'),

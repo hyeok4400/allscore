@@ -402,7 +402,33 @@ export default function MatchDetailScreen() {
   useEffect(() => {
     if (!id) return;
 
-    // 1. 캐시에 있으면 바로 표시
+    const isSoccer = id.startsWith('espn-soccer');
+
+    // Soccer: always use summary API — it returns real events + stats + lineup for any match/date
+    if (isSoccer) {
+      // Show cached basic info immediately while real data loads
+      const cached = getCachedMatchById(id) ?? getMockMatchById(id);
+      if (cached) {
+        setMatch(cached);
+        setMatchLoading(false);
+      }
+
+      fetchSoccerSummary(id, (cached as any)?.leagueSlug).then(summary => {
+        if (summary) {
+          setMatch(summary.match);
+          if (summary.lineups) { setLineups(summary.lineups); setLineupLoaded(true); }
+        } else if (!cached) {
+          setMatch(null);
+        }
+        setMatchLoading(false);
+      }).catch(() => {
+        if (!cached) setMatch(null);
+        setMatchLoading(false);
+      });
+      return;
+    }
+
+    // Baseball / Basketball: try cache first, then scoreboard
     const cached = getCachedMatchById(id) ?? getMockMatchById(id);
     if (cached) {
       setMatch(cached);
@@ -410,8 +436,7 @@ export default function MatchDetailScreen() {
       return;
     }
 
-    const sport = id.startsWith('espn-soccer') ? 'soccer'
-      : id.startsWith('espn-bball') ? 'basketball'
+    const sport = id.startsWith('espn-bball') ? 'basketball'
       : id.startsWith('espn-baseball') ? 'baseball'
       : null;
 
@@ -421,44 +446,15 @@ export default function MatchDetailScreen() {
       return;
     }
 
-    // 2. 오늘 스코어보드에서 찾기
-    fetchMatchesBySport(sport).then(async matches => {
-      cacheMatches(matches);
-      const found = matches.find(m => m.id === id);
-      if (found) {
-        // 종료/라이브 경기는 summary에서 실제 이벤트+통계도 가져오기
-        if (found.sport === 'soccer' && (found.status === 'FINISHED' || found.status === 'LIVE')) {
-          const summary = await fetchSoccerSummary(id, (found as any).leagueSlug);
-          if (summary) {
-            setMatch(summary.match);
-            if (summary.lineups) { setLineups(summary.lineups); setLineupLoaded(true); }
-          } else {
-            setMatch(found);
-          }
-        } else {
-          setMatch(found);
-        }
-        setMatchLoading(false);
-        return;
-      }
+    const today = (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    })();
 
-      // 3. 스코어보드에 없음(과거 경기 등) — summary API로 직접 조회
-      if (sport === 'soccer') {
-        const summary = await fetchSoccerSummary(id);
-        if (summary) {
-          setMatch(summary.match);
-          if (summary.lineups) {
-            setLineups(summary.lineups);
-            setLineupLoaded(true);
-          }
-        } else {
-          setMatch(null);
-        }
-      } else {
-        setMatch(null);
-      }
-      setMatchLoading(false);
-      return;
+    fetchMatchesBySport(sport, today).then(matches => {
+      cacheMatches(matches);
+      const found = matches.find(m => m.id === id) ?? null;
+      setMatch(found);
       setMatchLoading(false);
     }).catch(() => {
       setMatch(null);
@@ -520,9 +516,9 @@ export default function MatchDetailScreen() {
   const handleTabPress = (tabKey: DetailTab) => {
     setActiveTab(tabKey);
     if (tabKey === 'lineup' && !lineupLoaded && match.sport === 'soccer') {
-      setLineupLoaded(true);
-      fetchSoccerLineup(match.id).then(result => {
+      fetchSoccerLineup(match.id, (match as any).leagueSlug).then(result => {
         setLineups(result);
+        setLineupLoaded(true);
       });
     }
   };
